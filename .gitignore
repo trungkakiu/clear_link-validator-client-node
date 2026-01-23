@@ -1,0 +1,25 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.cache
+*.log
+
+# Build
+bin/
+obj/
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+git rm -r --cached leveldb_data
+# LevelDB & runtime state
+leveldb_data/
+*.db
+*-log.db
+validator_state.db
+validator_state-log.db
