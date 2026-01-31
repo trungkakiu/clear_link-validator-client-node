@@ -281,30 +281,13 @@ namespace WorkerService1.Services.Validator_data
             return list[0];
         }
 
-        public string RecomputeBlockHash(Block block)
+        public string ComputeBlockHashFromHeader(byte[] headerRaw)
         {
             using var sha = SHA256.Create();
-
-            string input =
-                $"{block.Height}|" +
-                $"{Norm(block.PreviousHash)}|" +
-                $"{Norm(block.current_id)}|" +
-                $"{Norm(block.Owner_id)}|" +
-                $"{block.Version}|" +
-                $"{Norm(block.type)}" +
-                $"{Norm(block.MerkleRoot)}";
-
-            var bytes = Encoding.UTF8.GetBytes(input);
-            var hash = sha.ComputeHash(bytes);
-
+            var hash = sha.ComputeHash(headerRaw);
             return Convert.ToHexString(hash).ToLowerInvariant();
         }
 
-        private static string Norm(string? v)
-        {
-            if (v == null) return "null";
-            return v.Trim();
-        }
 
         public List<Block> GetAllBlocks()
         {
@@ -323,6 +306,69 @@ namespace WorkerService1.Services.Validator_data
             }
 
             return blocks;
+        }
+
+        public ApiResponse compareHash(int height)
+        {
+            try
+            {
+                var current_block = GetBlockByHeight(height);
+                if (current_block == null)
+                {
+                    return (new ApiResponse
+                    {
+                        RM = "Khong tim thay block",
+                        RD = null,
+                        RC = -203
+                    });
+                }
+
+                var rehash = ComputeBlockHashFromHeader(current_block.headerRaw);
+                var pair = false;
+                if (rehash != null) { 
+                
+                    if(rehash != current_block.Hash)
+                    {
+                        pair = false;
+                    }
+                    else
+                    {
+                        pair = true;
+                    }
+
+                    return (new ApiResponse
+                    {
+                        RM = "Da kiem tra xong!",
+                        RD =
+                        new{
+                            pair = pair,
+                            rehash = rehash,
+                            product_hash = current_block.Hash
+                        },
+                        RC = 200
+                    });
+                }
+                else
+                {
+                    return (new ApiResponse
+                    {
+                        RM = "khong co rehash!",
+                        RD = current_block,
+                        RC = 500
+                    });
+                }
+
+
+        }
+            catch (Exception e)
+            {
+                return (new ApiResponse
+                {
+                    RM = "co loi he thong!",
+                    RD = e,
+                    RC = 500
+                });
+            }
         }
 
     }

@@ -156,7 +156,7 @@ public class Worker : BackgroundService
                         return;
                     }
 
-                    var expectedHash = _chain.RecomputeBlockHash(b);
+                    var expectedHash = _chain.ComputeBlockHashFromHeader(b.headerRaw);
                     if (b.Hash != expectedHash)
                     {
                         await HandleFork(ws, "HASH_MISMATCH", b.Height, null);
@@ -198,7 +198,7 @@ public class Worker : BackgroundService
             var latestBlock = _chain.GetLatestBlock();
             var height = 0;
 
-            var hash = "null";
+            var hash = "GENESIS";
             if (latestBlock != null)
             {
                 height = latestBlock.Height;

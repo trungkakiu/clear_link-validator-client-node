@@ -9,7 +9,7 @@
 
     public class Block
     {
-        public string headerRaw { get; set; }
+        public byte[] headerRaw { get; set; }
         public int Height { get; set; }            
         public string Hash { get; set; }
         public string type { get; set; }
@@ -25,5 +25,6 @@
         public string Version { get; set; } = "1.0";
 
     }
+
 
 }

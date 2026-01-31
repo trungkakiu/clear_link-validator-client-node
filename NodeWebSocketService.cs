@@ -7,11 +7,15 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography.Xml;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Xml.Linq;
 using WorkerService1.Controller;
 using WorkerService1.Model;
 using WorkerService1.Services.Validator_data;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Encodings.Web;
 
 public class NodeWebSocketService
 {
@@ -109,7 +113,7 @@ public class NodeWebSocketService
     private async Task SendInit(CancellationToken token)
     {
         var height = 0;
-        var hash = "null";
+        var hash = "GENESIS";
         var status = _nodeDb.GetStatus();
 
         var latest = _chain.GetLatestBlock();
@@ -210,6 +214,7 @@ public class NodeWebSocketService
                 var json = JsonDocument.Parse(msgString);
                 var root = json.RootElement;
 
+               
                 if (_state == WsState.Authenticated &&
                 !string.IsNullOrEmpty(SessionContext.Instance.SessionId))
                 {
@@ -228,6 +233,10 @@ public class NodeWebSocketService
                 string sessionId = root.TryGetProperty("sessionId", out var sid)
                       ? sid.GetString() ?? SessionContext.Instance.SessionId
                       : SessionContext.Instance.SessionId;
+
+                var time = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                _nodeDb.ChangeLastActive(time);
+
 
                 if (type == "command")
                 {   
@@ -290,6 +299,7 @@ public class NodeWebSocketService
                             {
                                 type = "vote_response",
                                 command = "vote_result",
+                                sessionId = sessionId,
                                 requestId = requestId,
                                 nodeId = _config.NodeId,
                                 voteRoundId = voteRoundId,
@@ -316,6 +326,7 @@ public class NodeWebSocketService
                             type = "vote_response",
                             command = "vote_result",
                             requestId = requestId,
+                            sessionId = sessionId,
                             nodeId = _config.NodeId,
                             voteRoundId = voteRoundId,
                             payload = votedata.client_hash,
@@ -347,10 +358,18 @@ public class NodeWebSocketService
                             return;
                         }
 
-                        var votePayload = voteResult.RD;
 
- 
-                        var payloadJson = JsonSerializer.Serialize(votePayload);
+                        var options = new JsonSerializerOptions
+                        {
+                          
+                            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+
+                            WriteIndented = false,
+
+                            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                        };
+                        var votePayload = voteResult.RD;
+                        string payloadJson = JsonSerializer.Serialize(votePayload, options);
 
                         var signer = RSA.Create();
                         signer.ImportFromPem(_config.private_key);
@@ -361,6 +380,10 @@ public class NodeWebSocketService
                             RSASignaturePadding.Pkcs1
                         );
 
+                        var votepayload = new
+                        {
+                            votes = voteResult.RD
+                        };
                         var signature = Convert.ToBase64String(signatureBytes);
 
                         await Send(new
@@ -369,7 +392,8 @@ public class NodeWebSocketService
                             voteRoundId = root.GetProperty("voteRoundId").GetString(),
                             sessionId = SessionContext.Instance.SessionId,
                             nodeId = _config.NodeId,
-                            votePayload,
+                            payloadJson = payloadJson,
+                            votePayload = votepayload,
                             signature = signature,
                             serverTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                         }, token);
@@ -442,7 +466,7 @@ public class NodeWebSocketService
                             time = DateTime.UtcNow
                         }, token);
                     }
-
+                        
                     if (command == "override_block")
                     {
                         _logger.LogInformation("override_block received!");
@@ -540,12 +564,11 @@ public class NodeWebSocketService
                 {
                     try
                     {
-                      
-
                         var ok = root.GetProperty("ok").GetBoolean();
+
                         string? status = root.TryGetProperty("status", out var st)
-                              ? st.GetString()
-                              : null;
+                            ? st.GetString()
+                            : null;
 
                         string? syncStatus = root.TryGetProperty("sync_status", out var ss)
                             ? ss.GetString()
@@ -562,7 +585,7 @@ public class NodeWebSocketService
                             {
                                 type = "client_log",
                                 level = "WARN",
-                                sessionId = sessionId,
+                                sessionId,
                                 message = "sync_response not ok",
                                 syncStatus
                             }, token);
@@ -580,7 +603,7 @@ public class NodeWebSocketService
                             await Send(new
                             {
                                 type = "client_log",
-                                sessionId = sessionId,
+                                sessionId,
                                 level = "ERROR",
                                 message = "fork detected from server"
                             }, token);
@@ -588,12 +611,53 @@ public class NodeWebSocketService
                             _nodeDb.ChangeStatus("fork");
                             return;
                         }
+
                         List<Block> blocks = new();
 
                         if (root.TryGetProperty("blocks", out var blocksProp) &&
                             blocksProp.ValueKind == JsonValueKind.Array)
                         {
-                            blocks = blocksProp.Deserialize<List<Block>>() ?? new();
+                            foreach (var blockEl in blocksProp.EnumerateArray())
+                            {
+                                var b = new Block
+                                {
+                                    Height = blockEl.GetProperty("Height").GetInt32(),
+                                    Hash = blockEl.GetProperty("Hash").GetString()!,
+                                    PreviousHash = blockEl.GetProperty("PreviousHash").GetString()!,
+                                    current_id = blockEl.GetProperty("current_id").GetString()!,
+                                    Owner_id = blockEl.GetProperty("Owner_id").GetString()!,
+                                    status = blockEl.GetProperty("status").GetString()!,
+                                    Timestamp = blockEl.GetProperty("Timestamp").GetString()!,
+                                    type = blockEl.GetProperty("type").GetString()!,
+                                    ValidatorSignature = blockEl.GetProperty("ValidatorSignature").GetString()!,
+                                    Version = blockEl.GetProperty("Version").GetString()!,
+                                    MerkleRoot = blockEl.GetProperty("MerkleRoot").GetString()!,
+                                    Creator = blockEl.TryGetProperty("Creator", out var cr)
+                                        ? cr.GetString()
+                                        : null
+
+                                };
+
+                                if (blockEl.TryGetProperty("headerRaw", out var hr) &&
+                                    hr.ValueKind == JsonValueKind.Object &&
+                                    hr.TryGetProperty("data", out var dataProp) &&
+                                    dataProp.ValueKind == JsonValueKind.Array)
+                                {
+                                    var bytes = new byte[dataProp.GetArrayLength()];
+                                    int i = 0;
+                                    foreach (var n in dataProp.EnumerateArray())
+                                    {
+                                        bytes[i++] = (byte)n.GetInt32();
+                                    }
+                                    b.headerRaw = bytes;
+                                }
+                                else
+                                {
+                                    throw new Exception("headerRaw missing or invalid format");
+                                }
+
+                                blocks.Add(b);
+                            }
                         }
 
                         if (blocks.Count == 0)
@@ -601,7 +665,7 @@ public class NodeWebSocketService
                             await Send(new
                             {
                                 type = "client_log",
-                                sessionId = sessionId,
+                                sessionId,
                                 level = "WARN",
                                 message = "no blocks received"
                             }, token);
@@ -624,12 +688,12 @@ public class NodeWebSocketService
                                 await Send(new
                                 {
                                     type = "client_log",
-                                    sessionId = sessionId,
+                                    sessionId,
                                     level = "ERROR",
                                     message = "block validation failed",
                                     expectedHeight,
                                     actualHeight = b.Height,
-                                    expectedPrevHash,       
+                                    expectedPrevHash,
                                     actualPrevHash = b.PreviousHash
                                 }, token);
 
@@ -644,7 +708,7 @@ public class NodeWebSocketService
                                 {
                                     type = "client_log",
                                     level = "ERROR",
-                                    sessionId = sessionId,
+                                    sessionId,
                                     message = "block save failed",
                                     expectedHeight,
                                     actualHeight = b.Height,
@@ -653,6 +717,7 @@ public class NodeWebSocketService
                                 }, token);
                                 return;
                             }
+
                             expectedPrevHash = b.Hash;
                             expectedHeight++;
                         }
@@ -666,7 +731,7 @@ public class NodeWebSocketService
                         await Send(new
                         {
                             type = "client_log",
-                            sessionId = sessionId,
+                            sessionId,
                             level = "INFO",
                             message = "sync_response handled successfully",
                             finalHeight = expectedHeight - 1
@@ -674,8 +739,6 @@ public class NodeWebSocketService
                     }
                     catch (Exception ex)
                     {
-
-
                         await Send(new
                         {
                             type = "client_log",
@@ -692,7 +755,8 @@ public class NodeWebSocketService
                     }
                 }
 
-                if(type == "fork_response")
+
+                if (type == "fork_response")
                 {
                     try
                     {
@@ -922,5 +986,6 @@ public class NodeWebSocketService
         }
     }
 
-
+       
+  
 }

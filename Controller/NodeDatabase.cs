@@ -111,6 +111,33 @@ namespace WorkerService1.Controller
             });
         }
 
+        public IResult ChangeLastActive(long time)
+        {
+            if (time == null)
+                return Results.Json(new { RM = "Thiếu dữ liệu payload", RC = -401 });
+
+            var node = _nodes.FindOne(x => x.Id == 1);
+            if (node == null)
+            {
+                return Results.Json(new
+                {
+                    RM = "Không tìm thấy node local",
+                    RC = -404
+                });
+            }
+
+            node.LastActive = time;
+     
+            _nodes.Upsert(node);
+
+            return Results.Json(new
+            {
+                RC = 200,
+                RM = "Cập nhật lastactive thành công",
+                RD = node
+            });
+        }
+
         public void UpdateLastActive()
         {
             var node = _nodes.FindOne(x => x.Id == 1);
@@ -131,6 +158,11 @@ namespace WorkerService1.Controller
             });
         }
 
+        public IResult PairHash(int height)
+        {
+            var hashpair = _chain.compareHash(height);
+            return Results.Json(hashpair);
+        }
         public IResult GetFullBlock()
         {
    

@@ -129,18 +129,17 @@ namespace WorkerService1.Controller
                     }
 
 
-                    var recomputedHash = ComputeBlockHash(block.headerRaw);
+                    var recomputedHash = _chain.ComputeBlockHashFromHeader(block.headerRaw);
 
 
                     if (recomputedHash != block.Hash)
                     {
                         results.Add(new VoteDropResult
                         {
-                       
-                            product_id = block.Hash,
-                            //product_id = p.product_id,
-                            approve = false,
-                            reason = recomputedHash
+                            product_id = p.product_id,
+                            approve = recomputedHash == block.Hash,
+                            reason = ""
+                        
                         });
                         continue;
                     }
@@ -156,10 +155,7 @@ namespace WorkerService1.Controller
                 {
                     RC = 200,
                     RM = "Vote OK",
-                    RD = new
-                    {
-                        votes = results
-                    }
+                    RD = results
                 };
             }
             catch (Exception ex)
@@ -196,6 +192,7 @@ namespace WorkerService1.Controller
                     RM = "Pair product → BLOCK CREATED",
                     RD = new
                     {
+
                         block_hash = block.Hash,
                         height = block.Height,
                         previous = block.PreviousHash,
@@ -378,12 +375,19 @@ namespace WorkerService1.Controller
                 if (dto == null)
                     return new ApiResponse { RC = 203, RM = "Missing dto!" };
 
-           
                 var latest = _chain.GetLatestBlock();
 
                 int height = latest == null ? 1 : latest.Height + 1;
                 string previousHash = latest?.Hash ?? "GENESIS";
-
+                var existSBlock = _chain.GetBlockByType(dto.user.id, "user_create", "active");
+                if(existSBlock != null)
+                {
+                    return new ApiResponse
+                    {
+                        RC = 203,
+                        RM = "Pair user → BLOCK EXISTS"
+                    };
+                }
                 var block = CreateBlockFromPayload(dto, height, previousHash);
                 
                 block.ValidatorSignature = SignBlock(block);
@@ -422,14 +426,17 @@ namespace WorkerService1.Controller
                 throw new Exception("Payload or payload.user is null.");
 
             var merkle = payload.user.hash;
+            var prev = previousHash ?? "GENESIS";
             string headerRaw =
-            $"{height}|{previousHash}|{""}|{payload.user.id}|{payload.user.version}|{payload.user.type}|{payload.user.hash}";
+            $"{height}|{prev}|{""}|{payload.user.id}|{payload.user.version}|{payload.user.type}|{payload.user.hash}";
+
+            byte[] headerRawBytes = Encoding.UTF8.GetBytes(headerRaw);
 
             var block = new Block
             {
-                headerRaw = headerRaw,
+                headerRaw = headerRawBytes,
                 Height = height,
-                PreviousHash = previousHash,
+                PreviousHash = prev,
                 type = payload.user.type,
                 current_id = "",
                 Owner_id = payload.user.id,
@@ -440,7 +447,7 @@ namespace WorkerService1.Controller
                 Version = payload.user.version,
             };
 
-            block.Hash = ComputeBlockHash(headerRaw);
+            block.Hash = _chain.ComputeBlockHashFromHeader(headerRawBytes);
 
             return block;
         }
@@ -456,15 +463,17 @@ namespace WorkerService1.Controller
 
             }
             var merkle = payload.payload.hash;
+            var prev = previousHash ?? "GENESIS";
             string headerRaw =
-            $"{height}|{previousHash}|{payload.payload.product_id}|{payload.payload.Owner_id}|{payload.payload.version}|{payload.payload.type}|{payload.payload.hash}";
+            $"{height}|{prev}|{payload.payload.product_id}|{payload.payload.Owner_id}|{payload.payload.version}|{payload.payload.type}|{payload.payload.hash}";
 
+            byte[] headerRawBytes = Encoding.UTF8.GetBytes(headerRaw);
 
             var block = new Block
             {
-                headerRaw = headerRaw,
+                headerRaw = headerRawBytes,
                 Height = height,
-                PreviousHash = previousHash,
+                PreviousHash = prev,
                 type = payload.payload.type,
                 current_id = payload.payload.product_id,
                 Owner_id = payload.payload.Owner_id,
@@ -476,7 +485,7 @@ namespace WorkerService1.Controller
              
             };
 
-            block.Hash = ComputeBlockHash(headerRaw);
+            block.Hash = _chain.ComputeBlockHashFromHeader(headerRawBytes) ;
 
             return block;
         }
@@ -514,20 +523,12 @@ namespace WorkerService1.Controller
                 Version = payload.payload.version,
             };
 
-            block.Hash = ComputeBlockHash(Current_block.headerRaw);
+            block.Hash = _chain.ComputeBlockHashFromHeader(Current_block.headerRaw);
 
             return block;
         }
 
-        private string ComputeBlockHash(string raw)
-        {
-            using var sha = SHA256.Create();
-            return Convert
-                .ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(raw)))
-                .ToLowerInvariant();
-        }
-
-
+      
 
         private string SignBlock(Block block)
         {

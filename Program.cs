@@ -88,5 +88,10 @@ api.MapPost("/debug/forkblock", (NodeDatabase db) =>
     return db.CreateForkBlockAtTip("hahahaahahahah");
 });
 
+api.MapPost("/debug/pairhash", (NodeDatabase db, int height) =>
+{
+    return db.PairHash(height);
+});
+
 
 app.Run();
