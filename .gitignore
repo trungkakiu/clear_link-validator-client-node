@@ -23,3 +23,4 @@ leveldb_data/
 *-log.db
 validator_state.db
 validator_state-log.db
+configs\validator_config.json

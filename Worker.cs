@@ -15,8 +15,9 @@ public class Worker : BackgroundService
     private readonly BlockchainService _chain;
     private readonly NodeRuntimeState _runtime;
     private readonly NodeWebSocketService _ws;
+    private readonly TaskQueueService _taskQueue;
 
-    public Worker(NodeWebSocketService ws,ILogger<Worker> logger, IServiceScopeFactory scopeFactory, NodeConfigDto config, BlockchainService chain, NodeDatabase node, NodeRuntimeState runtime)
+    public Worker(NodeWebSocketService ws,ILogger<Worker> logger, IServiceScopeFactory scopeFactory, TaskQueueService task, NodeConfigDto config, BlockchainService chain, NodeDatabase node, NodeRuntimeState runtime)
     {
         _logger = logger;
         _scopeFactory = scopeFactory;
@@ -25,6 +26,7 @@ public class Worker : BackgroundService
         _node = node;
         _runtime = runtime;
         _ws = ws;
+        _taskQueue = task;
     }
        
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -32,8 +34,10 @@ public class Worker : BackgroundService
         var ws = _ws;
 
         _ = ws.Start(stoppingToken);
-        await ws.ConnectedTcs.Task;
+        _ = _taskQueue.StartProcessingAsync(stoppingToken);
 
+        await _ws.ConnectedTcs.Task;
+        _logger.LogInformation("Node connected. Starting main logic loop...");
         while (!stoppingToken.IsCancellationRequested)
         {
             var status = ws.CurrentStatus;

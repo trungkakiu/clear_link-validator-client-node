@@ -1,4 +1,5 @@
 ﻿using Azure.Core;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 using System.Net.NetworkInformation;
@@ -8,14 +9,14 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography.Xml;
 using System.Text;
 using System.Text.Encodings.Web;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Xml.Linq;
 using WorkerService1.Controller;
 using WorkerService1.Model;
 using WorkerService1.Services.Validator_data;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.Encodings.Web;
 
 public class NodeWebSocketService
 {
@@ -25,9 +26,11 @@ public class NodeWebSocketService
     private readonly ValidateController _controller;
     private readonly BlockchainService _chain;
     private readonly LevelDbStorage _storage;
+    private TaskQueueService __taskQueueService;
     private readonly NodeDatabase _nodeDb;
     private readonly NodeRuntimeState _runtime;
     public TaskCompletionSource<bool> ConnectedTcs = new();
+    private readonly ILogger<NodeWebSocketService> _log;
     private readonly PerformanceCounter cpuCounter =
     new PerformanceCounter("Processor", "% Processor Time", "_Total");
     private bool _running = false;
@@ -35,14 +38,14 @@ public class NodeWebSocketService
     private readonly SemaphoreSlim _startLock = new(1, 1);
     private Task? _startTask;
 
-    public NodeWebSocketService(NodeRuntimeState runtime,ILogger<NodeWebSocketService> logger, NodeConfigDto config, ValidateController controller, LevelDbStorage storage, BlockchainService chain, NodeDatabase nodeDb)
+    public NodeWebSocketService(NodeRuntimeState runtime,ILogger<NodeWebSocketService> logger, TaskQueueService task, NodeConfigDto config, ValidateController controller, LevelDbStorage storage, BlockchainService chain, NodeDatabase nodeDb)
     {
 
         _logger = logger;
         _runtime = runtime;
         _config = config;
         _storage = storage;
-        
+        __taskQueueService = task;
         _controller = controller;
         _config = config;
         _chain = chain;
@@ -81,7 +84,7 @@ public class NodeWebSocketService
     private async Task StartCore(CancellationToken token)
     {
         _running = true;
-        var uri = new Uri("ws://192.168.110.197:5099");
+        var uri = new Uri("wss://api.clearlink.io.vn");
 
         while (!token.IsCancellationRequested && _running)
         {
@@ -239,8 +242,8 @@ public class NodeWebSocketService
 
 
                 if (type == "command")
-                {   
-                  
+                {
+
                     string command = root.GetProperty("command").GetString();
                     _logger.LogInformation($"WS Command Received: {command}");
                     string requestId = root.GetProperty("requestId").GetString();
@@ -248,7 +251,7 @@ public class NodeWebSocketService
 
                     if (command == "get_status")
                     {
-                        if(_config.Status != "active")
+                        if (_config.Status != "active")
                         {
                             await Send(new
                             {
@@ -287,7 +290,7 @@ public class NodeWebSocketService
                         var payloadElement = root.GetProperty("payload");
 
                         var votedata = payloadElement.Deserialize<VotePayloadDto>();
-                        
+
                         _logger.LogInformation("VotePayload received: " + JsonSerializer.Serialize(votedata));
 
                         var voteResult = new VoteResultDto();
@@ -361,7 +364,7 @@ public class NodeWebSocketService
 
                         var options = new JsonSerializerOptions
                         {
-                          
+
                             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 
                             WriteIndented = false,
@@ -407,6 +410,7 @@ public class NodeWebSocketService
 
                         var payloadElement = root.GetProperty("payload");
                         var dto = payloadElement.Deserialize<PairUserPayloadDto>();
+                            
 
                         if (status != "active")
                         {
@@ -421,21 +425,40 @@ public class NodeWebSocketService
                             return;
                         }
 
-                        var result = _controller.PairUser(dto);
-
-                        await Send(new
+                        await __taskQueueService.EnqueueTaskAsync(async (token) =>
                         {
-                            type = "pair_user_response",
-                            requestId = requestId,
-                            ok = result.RC == 200,
-                            block = result.RD,
-                            time = DateTime.UtcNow
-                        }, token);
+                            try {
+                                var result = _controller.PairUser(dto);
+
+                                await Send(new
+                                {
+                                    type = "pair_user_response",
+                                    requestId = requestId,
+                                    ok = result.RC == 200,
+                                    block = result.RD,
+                                    time = DateTime.UtcNow
+                                }, token);
+                            } catch (Exception ex) {
+                               
+
+                                await Send(new
+                                {
+                                    type = "pair_user_response",
+                                    requestId = requestId,
+                                    ok = false,
+                                    block = "",
+                                    time = DateTime.UtcNow
+                                }, token);
+                            }
+                            
+                        });
+
+                        
                     }
 
-                    if(command == "pair_product")
+                    if (command == "pair_product")
                     {
-                        _logger.LogInformation("PAIR_USER received!");
+                        _logger.LogInformation("PAIR_PRODUCT received!");
 
                         var payloadElement = root.GetProperty("payload");
                         var dto = payloadElement.Deserialize<PairProductPayloadDto>();
@@ -443,6 +466,7 @@ public class NodeWebSocketService
 
                         if (status != "active")
                         {
+                           
                             await Send(new
                             {
                                 type = "pair_product_response",
@@ -454,19 +478,37 @@ public class NodeWebSocketService
                             return;
                         }
 
-
-                        var result = _controller.PairProduct(dto);
-
-                        await Send(new
+                        await __taskQueueService.EnqueueTaskAsync(async (token) =>
                         {
-                            type = "pair_product_response",
-                            requestId = requestId,
-                            ok = result.RC == 200,
-                            block = result.RD,
-                            time = DateTime.UtcNow
-                        }, token);
+                            try
+                            {
+                                var result = _controller.PairProduct(dto);
+
+                                await Send(new
+                                {
+                                    type = "pair_product_response",
+                                    requestId = requestId,
+                                    ok = result.RC == 200,
+                                    block = result.RD,
+                                    time = DateTime.UtcNow
+                                }, token);
+                            }
+                            catch (Exception ex)
+                            {
+                                await Send(new
+                                {
+                                    type = "pair_product_response",
+                                    requestId = requestId,
+                                    ok = false,
+                                    block = "",
+                                    time = DateTime.UtcNow
+                                }, token);
+                            }
+                            
+                        });
+                       
                     }
-                        
+
                     if (command == "override_block")
                     {
                         _logger.LogInformation("override_block received!");
@@ -488,34 +530,106 @@ public class NodeWebSocketService
                         }
 
 
-                        ApiResponse result = new ApiResponse();
 
-                        switch (dto.payload.type)
+                        await __taskQueueService.EnqueueTaskAsync(async (token) =>
                         {
-                            case "product_create":
-                                result = _controller.RePairProduct(dto);
-                                break;
+                            try
+                            {
+                                ApiResponse result = new ApiResponse();
 
-                            default:
-                                result = new ApiResponse
+                                switch (dto.payload.type)
                                 {
-                                    RC = 500,
-                                    RM = "Truncate options"
-                                };
-                                break;
-                        }
+                                    case "product_create":
+                                        result = _controller.RePairProduct(dto);
+                                        break;
+
+                                    default:
+                                        result = new ApiResponse
+                                        {
+                                            RC = 500,
+                                            RM = "Truncate options"
+                                        };
+                                        break;
+                                }
 
 
-                        await Send(new
-                        {
-                            type = "override_block_respone",
-                            requestId = requestId,
-                            ok = result.RC == 200,
-                            block = result.RD,
-                            time = DateTime.UtcNow
-                        }, token);
+                                await Send(new
+                                {
+                                    type = "override_block_respone",
+                                    requestId = requestId,
+                                    ok = result.RC == 200,
+                                    block = result.RD,
+                                    time = DateTime.UtcNow
+                                }, token);
+                            }
+                            catch (Exception ex)
+                            {
+                                await Send(new
+                                {
+                                    type = "override_block_respone",
+                                    requestId = requestId,
+                                    ok = false,
+                                    error = ex,
+                                    block = "",
+                                    time = DateTime.UtcNow
+                                }, token);
+                            }
+
+                        });
+                        
                     }
 
+                    if (command == "pair_other")
+                    {
+                        _logger.LogInformation("PAIR_OTHER received!");
+
+                        var payloadElement = root.GetProperty("payload");
+                        var dto = payloadElement.Deserialize<PairOtherPayloadDto>();
+
+
+                        if (status != "active")
+                        {
+                            await Send(new
+                            {
+                                type = "pair_other_response",
+                                requestId = requestId,
+                                ok = false,
+                                block = "node " + status,
+                                time = DateTime.UtcNow
+                            }, token);
+                            return;
+                        }
+
+                        await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                        {
+                            try {
+                                var result = _controller.PairOtherBlock(dto);
+
+                                await Send(new
+                                {
+                                    type = "pair_other_response",
+                                    requestId = requestId,
+                                    ok = result.RC == 200,
+                                    block = result.RD,
+                                    time = DateTime.UtcNow
+                                }, token);
+                            }
+                            catch(Exception ex)
+                            {
+                                await Send(new
+                                {
+                                    type = "pair_other_response",
+                                    requestId = requestId,
+                                    ok = false,
+                                    error = ex,
+                                    block = "",
+                                    time = DateTime.UtcNow
+                                }, token);
+                            }
+                        });
+
+                        
+                    }
                   
                 }
 
@@ -555,300 +669,310 @@ public class NodeWebSocketService
                         content = "Node connected and authenticated"
                     }, token);
 
-
-
-                   
                 }
 
                 if (type == "sync_response")
                 {
-                    try
+                    var ok = root.GetProperty("ok").GetBoolean();
+
+                    string? status = root.TryGetProperty("status", out var st)
+                        ? st.GetString()
+                        : null;
+
+                    string? syncStatus = root.TryGetProperty("sync_status", out var ss)
+                        ? ss.GetString()
+                        : null;
+
+                    SessionContext.Instance.SetSession(
+                        sessionId,
+                        _config.NodeId
+                    );
+
+                    if (!ok)
                     {
-                        var ok = root.GetProperty("ok").GetBoolean();
-
-                        string? status = root.TryGetProperty("status", out var st)
-                            ? st.GetString()
-                            : null;
-
-                        string? syncStatus = root.TryGetProperty("sync_status", out var ss)
-                            ? ss.GetString()
-                            : null;
-
-                        SessionContext.Instance.SetSession(
+                        await Send(new
+                        {
+                            type = "client_log",
+                            level = "WARN",
                             sessionId,
-                            _config.NodeId
-                        );
+                            message = "sync_response not ok",
+                            syncStatus
+                        }, token);
 
-                        if (!ok)
+                        if (syncStatus != "node_outlaw")
                         {
-                            await Send(new
-                            {
-                                type = "client_log",
-                                level = "WARN",
-                                sessionId,
-                                message = "sync_response not ok",
-                                syncStatus
-                            }, token);
-
-                            if (syncStatus != "node_outlaw")
-                            {
-                                _runtime.SyncRetryCount++;
-                                _runtime.SyncRequestInFlight = true;
-                            }
-                            return;
+                            _runtime.SyncRetryCount++;
+                            _runtime.SyncRequestInFlight = true;
                         }
+                        return;
+                    }
 
-                        if (status == "fork")
+                    if (status == "fork")
+                    {
+                        await Send(new
                         {
-                            await Send(new
-                            {
-                                type = "client_log",
-                                sessionId,
-                                level = "ERROR",
-                                message = "fork detected from server"
-                            }, token);
+                            type = "client_log",
+                            sessionId,
+                            level = "ERROR",
+                            message = "fork detected from server"
+                        }, token);
 
-                            _nodeDb.ChangeStatus("fork");
-                            return;
-                        }
+                        _nodeDb.ChangeStatus("fork");
+                        return;
+                    }
 
-                        List<Block> blocks = new();
 
-                        if (root.TryGetProperty("blocks", out var blocksProp) &&
-                            blocksProp.ValueKind == JsonValueKind.Array)
+                    await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                    {
+                        try
                         {
-                            foreach (var blockEl in blocksProp.EnumerateArray())
+
+                            List<Block> blocks = new();
+
+                            if (root.TryGetProperty("blocks", out var blocksProp) &&
+                                blocksProp.ValueKind == JsonValueKind.Array)
                             {
-                                var b = new Block
+                                foreach (var blockEl in blocksProp.EnumerateArray())
                                 {
-                                    Height = blockEl.GetProperty("Height").GetInt32(),
-                                    Hash = blockEl.GetProperty("Hash").GetString()!,
-                                    PreviousHash = blockEl.GetProperty("PreviousHash").GetString()!,
-                                    current_id = blockEl.GetProperty("current_id").GetString()!,
-                                    Owner_id = blockEl.GetProperty("Owner_id").GetString()!,
-                                    status = blockEl.GetProperty("status").GetString()!,
-                                    Timestamp = blockEl.GetProperty("Timestamp").GetString()!,
-                                    type = blockEl.GetProperty("type").GetString()!,
-                                    ValidatorSignature = blockEl.GetProperty("ValidatorSignature").GetString()!,
-                                    Version = blockEl.GetProperty("Version").GetString()!,
-                                    MerkleRoot = blockEl.GetProperty("MerkleRoot").GetString()!,
-                                    Creator = blockEl.TryGetProperty("Creator", out var cr)
-                                        ? cr.GetString()
-                                        : null
-
-                                };
-
-                                if (blockEl.TryGetProperty("headerRaw", out var hr) &&
-                                    hr.ValueKind == JsonValueKind.Object &&
-                                    hr.TryGetProperty("data", out var dataProp) &&
-                                    dataProp.ValueKind == JsonValueKind.Array)
-                                {
-                                    var bytes = new byte[dataProp.GetArrayLength()];
-                                    int i = 0;
-                                    foreach (var n in dataProp.EnumerateArray())
+                                    var b = new Block
                                     {
-                                        bytes[i++] = (byte)n.GetInt32();
+                                        Height = blockEl.GetProperty("Height").GetInt32(),
+                                        Hash = blockEl.GetProperty("Hash").GetString()!,
+                                        PreviousHash = blockEl.GetProperty("PreviousHash").GetString()!,
+                                        current_id = blockEl.GetProperty("current_id").GetString()!,
+                                        Owner_id = blockEl.GetProperty("Owner_id").GetString()!,
+                                        status = blockEl.GetProperty("status").GetString()!,
+                                        Timestamp = blockEl.GetProperty("Timestamp").GetString()!,
+                                        type = blockEl.GetProperty("type").GetString()!,
+                                        ValidatorSignature = blockEl.GetProperty("ValidatorSignature").GetString()!,
+                                        Version = blockEl.GetProperty("Version").GetString()!,
+                                        MerkleRoot = blockEl.GetProperty("MerkleRoot").GetString()!,
+                                        Creator = blockEl.TryGetProperty("Creator", out var cr)
+                                            ? cr.GetString()
+                                            : null
+
+                                    };
+
+                                    if (blockEl.TryGetProperty("headerRaw", out var hr) &&
+                                        hr.ValueKind == JsonValueKind.Object &&
+                                        hr.TryGetProperty("data", out var dataProp) &&
+                                        dataProp.ValueKind == JsonValueKind.Array)
+                                    {
+                                        var bytes = new byte[dataProp.GetArrayLength()];
+                                        int i = 0;
+                                        foreach (var n in dataProp.EnumerateArray())
+                                        {
+                                            bytes[i++] = (byte)n.GetInt32();
+                                        }
+                                        b.headerRaw = bytes;
                                     }
-                                    b.headerRaw = bytes;
-                                }
-                                else
-                                {
-                                    throw new Exception("headerRaw missing or invalid format");
-                                }
+                                    else
+                                    {
+                                        throw new Exception("headerRaw missing or invalid format");
+                                    }
 
-                                blocks.Add(b);
+                                    blocks.Add(b);
+                                }
                             }
-                        }
 
-                        if (blocks.Count == 0)
-                        {
+                            if (blocks.Count == 0)
+                            {
+                                await Send(new
+                                {
+                                    type = "client_log",
+                                    sessionId,
+                                    level = "WARN",
+                                    message = "no blocks received"
+                                }, token);
+
+                                _runtime.SyncRetryCount++;
+                                return;
+                            }
+
+                            blocks.Sort((a, b) => a.Height.CompareTo(b.Height));
+
+                            var latest = _chain.GetLatestBlock();
+                            var expectedHeight = (latest?.Height ?? 0) + 1;
+                            var expectedPrevHash = latest?.Hash ?? "GENESIS";
+
+                            foreach (var b in blocks)
+                            {
+                                if (b.Height != expectedHeight ||
+                                    b.PreviousHash != expectedPrevHash)
+                                {
+                                    await Send(new
+                                    {
+                                        type = "client_log",
+                                        sessionId,
+                                        level = "ERROR",
+                                        message = "block validation failed",
+                                        expectedHeight,
+                                        actualHeight = b.Height,
+                                        expectedPrevHash,
+                                        actualPrevHash = b.PreviousHash
+                                    }, token);
+
+                                    _nodeDb.ChangeStatus("fork");
+                                    return;
+                                }
+
+                                var save = _chain.SaveBlock(b);
+                                if (!save)
+                                {
+                                    await Send(new
+                                    {
+                                        type = "client_log",
+                                        level = "ERROR",
+                                        sessionId,
+                                        message = "block save failed",
+                                        expectedHeight,
+                                        actualHeight = b.Height,
+                                        expectedPrevHash,
+                                        actualPrevHash = b.PreviousHash
+                                    }, token);
+                                    return;
+                                }
+
+                                expectedPrevHash = b.Hash;
+                                expectedHeight++;
+                            }
+
+                            _nodeDb.ChangeStatus(
+                                syncStatus == "complate" ? "active" : "syncing"
+                            );
+
+                            _runtime.SyncRequestInFlight = false;
+
                             await Send(new
                             {
                                 type = "client_log",
                                 sessionId,
-                                level = "WARN",
-                                message = "no blocks received"
+                                level = "INFO",
+                                message = "sync_response handled successfully",
+                                finalHeight = expectedHeight - 1
+                            }, token);
+                        }
+                        catch (Exception ex)
+                        {
+                            await Send(new
+                            {
+                                type = "client_log",
+                                sessionId = SessionContext.Instance.SessionId,
+                                level = "FATAL",
+                                message = "exception while handling sync_response",
+                                error = ex.Message,
+                                stack = ex.StackTrace
                             }, token);
 
                             _runtime.SyncRetryCount++;
+                            _runtime.SyncRequestInFlight = false;
                             return;
                         }
-
-                        blocks.Sort((a, b) => a.Height.CompareTo(b.Height));
-
-                        var latest = _chain.GetLatestBlock();
-                        var expectedHeight = (latest?.Height ?? 0) + 1;
-                        var expectedPrevHash = latest?.Hash ?? "GENESIS";
-
-                        foreach (var b in blocks)
-                        {
-                            if (b.Height != expectedHeight ||
-                                b.PreviousHash != expectedPrevHash)
-                            {
-                                await Send(new
-                                {
-                                    type = "client_log",
-                                    sessionId,
-                                    level = "ERROR",
-                                    message = "block validation failed",
-                                    expectedHeight,
-                                    actualHeight = b.Height,
-                                    expectedPrevHash,
-                                    actualPrevHash = b.PreviousHash
-                                }, token);
-
-                                _nodeDb.ChangeStatus("fork");
-                                return;
-                            }
-
-                            var save = _chain.SaveBlock(b);
-                            if (!save)
-                            {
-                                await Send(new
-                                {
-                                    type = "client_log",
-                                    level = "ERROR",
-                                    sessionId,
-                                    message = "block save failed",
-                                    expectedHeight,
-                                    actualHeight = b.Height,
-                                    expectedPrevHash,
-                                    actualPrevHash = b.PreviousHash
-                                }, token);
-                                return;
-                            }
-
-                            expectedPrevHash = b.Hash;
-                            expectedHeight++;
-                        }
-
-                        _nodeDb.ChangeStatus(
-                            syncStatus == "complate" ? "active" : "syncing"
-                        );
-
-                        _runtime.SyncRequestInFlight = false;
-
-                        await Send(new
-                        {
-                            type = "client_log",
-                            sessionId,
-                            level = "INFO",
-                            message = "sync_response handled successfully",
-                            finalHeight = expectedHeight - 1
-                        }, token);
-                    }
-                    catch (Exception ex)
-                    {
-                        await Send(new
-                        {
-                            type = "client_log",
-                            sessionId = SessionContext.Instance.SessionId,
-                            level = "FATAL",
-                            message = "exception while handling sync_response",
-                            error = ex.Message,
-                            stack = ex.StackTrace
-                        }, token);
-
-                        _runtime.SyncRetryCount++;
-                        _runtime.SyncRequestInFlight = false;
-                        return;
-                    }
+                    });
+                   
                 }
 
 
                 if (type == "fork_response")
                 {
-                    try
-                    {
-                        var ok = root.GetProperty("ok").GetBoolean();
+                   
+                    var ok = root.GetProperty("ok").GetBoolean();
 
-                        if (!ok)
-                        {
-                            await Send(new
-                            {
-                                type = "log",
-                                level = "ERROR",
-                                message = "server critical"
-                            }, token);
-                            return;
-                        }
-
-                        var status = _nodeDb.GetStatus();
-                        if(status != "fork")
-                        {
-                            await Send(new
-                            {
-                                type = "log",
-                                level = "WARN",
-                                message = "node status not fork"
-                            }, token);
-                            return;
-                        }
-
-                        var fork_point = root.GetProperty("fork_point").GetInt32();
-                        var truth_pos = root.GetProperty("truth_point").GetBoolean();
-                        if (fork_point != -1 && fork_point > 0)
-                        {
-                            var latest_block = _chain.GetLatestBlock();
-                            if (latest_block == null) return;
-                            for(int i = latest_block.Height; i > fork_point; i--)
-                            {
-                               var delete = _chain.DeleteBlockByHeight(i);
-
-                                if (!delete)
-                                {
-                                    await Send(new
-                                    {
-                                        type = "log",
-                                        level = "ERROR",
-                                        message = $"delete block {i} failed"
-                                    }, token);
-                                    return;
-                                }
-                            }
-
-                            if (truth_pos)
-                            {
-                                _nodeDb.ChangeStatus("syncing");
-
-                            }
-                            else
-                            {
-                                _nodeDb.ChangeStatus("fork");
-
-                            }
-                            await Send(new
-                            {
-                                type = "log",
-                                level = "SUCCESS",
-                                message = "one step complate"
-                            }, token);
-                            return;
-
-                        }
-                        else
-                        {
-                            await Send(new
-                            {
-                                type = "log",
-                                level = "ERROR",
-                                message = "invalid fork point"
-                            }, token);
-                            return;
-                        }
-
-                    }catch(Exception ex)
+                    if (!ok)
                     {
                         await Send(new
                         {
                             type = "log",
-                            level = "FATAL",
-                            nodeId = _config.NodeId,
-                            massage = ex.Message,
-                            stack = ex.StackTrace
+                            level = "ERROR",
+                            message = "server critical"
                         }, token);
                         return;
                     }
+
+                    var status = _nodeDb.GetStatus();
+                    if (status != "fork")
+                    {
+                        await Send(new
+                        {
+                            type = "log",
+                            level = "WARN",
+                            message = "node status not fork"
+                        }, token);
+                        return;
+                    }
+
+                    await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                    {
+                        try
+                        {
+
+                            var fork_point = root.GetProperty("fork_point").GetInt32();
+                            var truth_pos = root.GetProperty("truth_point").GetBoolean();
+                            if (fork_point != -1 && fork_point > 0)
+                            {
+                                var latest_block = _chain.GetLatestBlock();
+                                if (latest_block == null) return;
+                                for (int i = latest_block.Height; i > fork_point; i--)
+                                {
+                                    var delete = _chain.DeleteBlockByHeight(i);
+
+                                    if (!delete)
+                                    {
+                                        await Send(new
+                                        {
+                                            type = "log",
+                                            level = "ERROR",
+                                            message = $"delete block {i} failed"
+                                        }, token);
+                                        return;
+                                    }
+                                }
+
+                                if (truth_pos)
+                                {
+                                    _nodeDb.ChangeStatus("syncing");
+
+                                }
+                                else
+                                {
+                                    _nodeDb.ChangeStatus("fork");
+
+                                }
+                                await Send(new
+                                {
+                                    type = "log",
+                                    level = "SUCCESS",
+                                    message = "one step complate"
+                                }, token);
+                                return;
+
+                            }
+                            else
+                            {
+                                await Send(new
+                                {
+                                    type = "log",
+                                    level = "ERROR",
+                                    message = "invalid fork point"
+                                }, token);
+                                return;
+                            }
+
+                        }
+                        catch (Exception ex)
+                        {
+                            await Send(new
+                            {
+                                type = "log",
+                                level = "FATAL",
+                                nodeId = _config.NodeId,
+                                massage = ex.Message,
+                                stack = ex.StackTrace
+                            }, token);
+                            return;
+                        }
+                    });
+                    
                 }
 
             }

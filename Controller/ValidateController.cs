@@ -169,6 +169,49 @@ namespace WorkerService1.Controller
             }
         }
 
+        public ApiResponse PairOtherBlock(PairOtherPayloadDto dto)
+        {
+            try
+            {
+                if (dto == null)
+                    return new ApiResponse { RC = 203, RM = "Missing dto!" };
+
+
+                var latest = _chain.GetLatestBlock();
+                int height = latest == null ? 1 : latest.Height + 1;
+                string previousHash = latest?.Hash ?? "GENESIS";
+                var block = CreateOtherBlockFromPayload(dto, height, previousHash);
+
+                block.ValidatorSignature = SignBlock(block);
+
+                _chain.SaveBlock(block);
+
+                return new ApiResponse
+                {
+                    RC = 200,
+                    RM = "Pair product → BLOCK CREATED",
+                    RD = new
+                    {
+
+                        block_hash = block.Hash,
+                        height = block.Height,
+                        previous = block.PreviousHash,
+                        type = "client",
+                        validator = _config.NodeId
+                    }
+                };
+
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse
+                {
+                    RC = 500,
+                    RM = "Internal error",
+                    RD = ex.Message
+                };
+            }
+        }
         public ApiResponse PairProduct(PairProductPayloadDto dto)
         {
             try
@@ -388,7 +431,7 @@ namespace WorkerService1.Controller
                         RM = "Pair user → BLOCK EXISTS"
                     };
                 }
-                var block = CreateBlockFromPayload(dto, height, previousHash);
+                var block = CreateUserBlockFromPayload(dto, height, previousHash);
                 
                 block.ValidatorSignature = SignBlock(block);
 
@@ -420,7 +463,7 @@ namespace WorkerService1.Controller
             }
         }
 
-        public Block CreateBlockFromPayload(PairUserPayloadDto payload, int height, string previousHash)
+        public Block CreateUserBlockFromPayload(PairUserPayloadDto payload, int height, string previousHash)
         {
             if (payload == null || payload.user == null)
                 throw new Exception("Payload or payload.user is null.");
@@ -445,6 +488,38 @@ namespace WorkerService1.Controller
                 MerkleRoot = merkle,
                 Creator = _config.NodeId,
                 Version = payload.user.version,
+            };
+
+            block.Hash = _chain.ComputeBlockHashFromHeader(headerRawBytes);
+
+            return block;
+        }
+
+        public Block CreateOtherBlockFromPayload(PairOtherPayloadDto payload, int height, string previousHash)
+        {
+            if (payload == null || payload.payload == null)
+                throw new Exception("Payload or payload.user is null.");
+
+            var merkle = payload.payload.hash;
+            var prev = previousHash ?? "GENESIS";
+            string headerRaw =
+            $"{height}|{prev}|{payload.payload.current_id}|{payload.payload.Owner_id}|{payload.payload.version}|{payload.payload.type}|{payload.payload.hash}";
+
+            byte[] headerRawBytes = Encoding.UTF8.GetBytes(headerRaw);
+
+            var block = new Block
+            {
+                headerRaw = headerRawBytes,
+                Height = height,
+                PreviousHash = prev,
+                type = payload.payload.type,
+                current_id = payload.payload.current_id,
+                Owner_id = payload.payload.Owner_id,
+                status = "active",
+                Timestamp = payload.timestamp,
+                MerkleRoot = merkle,
+                Creator = _config.NodeId,
+                Version = payload.payload.version,
             };
 
             block.Hash = _chain.ComputeBlockHashFromHeader(headerRawBytes);

@@ -43,6 +43,8 @@ builder.WebHost.UseUrls("http://localhost:5101");
 
 builder.Services.AddSingleton<NodeWebSocketService>();
 
+builder.Services.AddSingleton<TaskQueueService>();
+
 builder.Services.AddSingleton<NodeDatabase>();
 builder.Services.AddSingleton<LevelDbStorage>(sp =>
 {

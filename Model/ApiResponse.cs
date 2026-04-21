@@ -82,6 +82,13 @@ namespace WorkerService1.Model
     }
 
 
+    public class PairOtherPayloadDto
+    {
+        public string timestamp { get; set; }
+        public OtherBLocPairPayload payload { get; set; }
+    }
+
+
     public class ProductPairPayload
     {
         public string hash { get; set; }
@@ -94,6 +101,20 @@ namespace WorkerService1.Model
         public string original_value { get; set; }
 
     }
+
+    public class OtherBLocPairPayload
+    {
+        public string hash { get; set; }
+        public string type { get; set; }
+        public string version { get; set; }
+        public string current_id { get; set; }
+        public string Owner_id { get; set; }
+        public string detail { get; set; }
+        public string status { get; set; }
+        public string original_value { get; set; }
+
+    }
+
 
     public class RepairBlockPayloadDto
     {
