@@ -223,6 +223,7 @@ namespace WorkerService1.Services.Validator_data
             var block_current = GetBlockByHeight(block.Height);
             if (block_current != null) return false;
 
+
             string json = JsonSerializer.Serialize(block);
 
             _db.Put($"block_height_{block.Height}", json);

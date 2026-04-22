@@ -28,67 +28,47 @@ public class Worker : BackgroundService
         _ws = ws;
         _taskQueue = task;
     }
-       
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var ws = _ws;
-
-        _ = ws.Start(stoppingToken);
+        _ = _ws.Start(stoppingToken);
         _ = _taskQueue.StartProcessingAsync(stoppingToken);
 
         await _ws.ConnectedTcs.Task;
-        _logger.LogInformation("Node connected. Starting main logic loop...");
+        _logger.LogInformation(">>> [SYSTEM] Node connected. Vít ga...");
+
         while (!stoppingToken.IsCancellationRequested)
         {
-            var status = ws.CurrentStatus;
-            await ws.Send(new
-            {
-                type = "client_log",
-                nodeId = _config.NodeId,
-                status = status,
-                sessionId = SessionContext.Instance.SessionId,
-                time = DateTime.UtcNow
-            }, stoppingToken);
+            var status = _ws.CurrentStatus;
 
-            if(status == "maintenance")
+            await _ws.Send(new { type = "client_log", message="call_inc#" ,nodeId = _config.NodeId, status = status, sessionId = SessionContext.Instance.SessionId, time = DateTime.UtcNow }, stoppingToken);
+
+            if (status == "maintenance")
             {
-                await MaintanenceMode(stoppingToken, status, ws);
+                await MaintanenceMode(stoppingToken, status, _ws);
                 await Task.Delay(5000, stoppingToken);
-                continue;
             }
-
-            if (status == "fork")
+            else if (status == "fork")
             {
-                await ForkMode(stoppingToken, ws);
+                await ForkMode(stoppingToken, _ws);
                 await Task.Delay(5000, stoppingToken);
-                continue;
             }
-
-            if (status == "syncing")
+            else if (status == "syncing")
             {
-                await SyncMode(stoppingToken, status, ws);
+                await SyncMode(stoppingToken, status, _ws);
+                await Task.Delay(15000, stoppingToken);
             }
             else if (status == "active")
             {
-                await ActiveMode(stoppingToken, status, ws);
+                await ActiveMode(stoppingToken, status, _ws);
+                await Task.Delay(10000, stoppingToken);
             }
-
-            await Task.Delay(15000, stoppingToken);
-        }
-
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            using (var db_scope = _scopeFactory.CreateScope())
+            else
             {
-                var db = db_scope.ServiceProvider.GetRequiredService<NodeDatabase>();
+                await Task.Delay(3000, stoppingToken);
             }
-
-            await Task.Delay(3000, stoppingToken);
         }
-
     }
-
     private async Task HandleFork(
     NodeWebSocketService ws,
     string reason,
@@ -246,31 +226,26 @@ public class Worker : BackgroundService
             if (_runtime.SyncCooldownUntil != null &&
              now < _runtime.SyncCooldownUntil.Value)
             {
-                _logger.LogWarning(
-                    $"[SYNC] cooldown until {_runtime.SyncCooldownUntil}"
-                );
+                _logger.LogWarning($"[SYNC] cooldown until {_runtime.SyncCooldownUntil}");
                 return;
             }
 
             if ((now - _runtime.LastSyncAttemptAt).TotalSeconds < 10)
                 return;
 
+          
             if (_runtime.SyncRequestInFlight)
             {
-
-                if ((DateTime.UtcNow - _runtime.LastSyncRequestAt).TotalSeconds < 10)
+                if ((DateTime.UtcNow - _runtime.LastSyncRequestAt).TotalSeconds < 15)
                     return;
 
-                _logger.LogWarning("[SYNC] timeout, reset inFlight");
+                _logger.LogWarning("[SYNC] timeout, reset inFlight để thử lại.");
                 _runtime.SyncRequestInFlight = false;
             }
-
-
             if (_runtime.SyncRetryCount >= 500)
             {
                 _runtime.SyncCooldownUntil = now.AddMinutes(30);
                 _runtime.SyncRetryCount = 0;
-
                 _logger.LogError("[SYNC] enter cooldown 30 minutes");
                 return;
             }
@@ -278,9 +253,11 @@ public class Worker : BackgroundService
             var latest = _chain.GetLatestBlock();
             var fromHeight = (latest?.Height ?? 0);
 
+            _runtime.LastSyncAttemptAt = now;
+            _runtime.LastSyncRequestAt = now;
             _runtime.SyncRequestInFlight = true;
 
-            _logger.LogWarning($"[SYNC] request fromHeight={fromHeight}");
+            _logger.LogWarning($">>> [SYNC] Đang yêu cầu từ Height={fromHeight}");
 
             await ws.Send(new
             {
@@ -288,23 +265,24 @@ public class Worker : BackgroundService
                 sessionId = SessionContext.Instance.SessionId,
                 nodeId = _config.NodeId,
                 from_height = fromHeight,
-                limit = 20
+                limit = 50
             }, token);
+
         }
-        catch(Exception ex)
+        catch (Exception ex)
         {
+            _runtime.SyncRequestInFlight = false;
+
             await ws.Send(new
             {
                 type = "client_log",
                 sessionId = SessionContext.Instance.SessionId,
                 nodeId = _config.NodeId,
                 status = status,
-                massage = ex.Message
+                message = "Sync Error: " + ex.Message
             }, token);
         }
-        
     }
-
     private async Task ForkMode(CancellationToken token, NodeWebSocketService ws)
     {
         try
