@@ -19,8 +19,7 @@ var configPath = Path.Combine(configDir, "validator_config.json");
 
 if (!File.Exists(configPath))
 {
-    Console.WriteLine("validator_config.json NOT FOUND!");
-    Console.WriteLine("Service will wait until file exists...");
+   
     while (!File.Exists(configPath))
     {
         Thread.Sleep(1000);
@@ -78,6 +77,11 @@ var validator = app.Services.GetRequiredService<ValidatorMiddleware>();
 api.MapGet("/debug/node_info", (NodeDatabase db) =>
 {
     return db.GetFullNodeInfo();
+});
+
+api.MapPost("/debug/testkey", (NodeDatabase db) =>
+{
+    return db.TestKey("testkey");
 });
 
 api.MapGet("/debug/block", (NodeDatabase db) =>

@@ -138,7 +138,7 @@ namespace WorkerService1.Services.Validator_data
 
         public Block? GetLatestBlockByCurrentId(string currentId)
         {
-            var heightStr = _db.Get($"index_current_{currentId}");
+            var heightStr = _db.Get($"index_current_{currentId}".ToLower().Trim());
             if (heightStr == null) return null;
 
             return GetBlockByHeight(long.Parse(heightStr));
@@ -146,8 +146,14 @@ namespace WorkerService1.Services.Validator_data
 
         public Block? GetBlockByType(string type, string currentId, string status)
         {
-            var heightStr = _db.Get($"index_type_{type}_{currentId}_{status}");
-            if (heightStr == null) return null;
+            string key = $"index_type_{type}_{currentId}_{status}".ToLower().Trim();
+            var heightStr = _db.Get(key);
+
+            if (heightStr == null)
+            {
+                Console.WriteLine($"[DEBUG] Không tìm thấy Index cho Key: {key}");
+                return null;
+            }
 
             return GetBlockByHeight(long.Parse(heightStr));
         }
@@ -194,6 +200,23 @@ namespace WorkerService1.Services.Validator_data
             }
         }
 
+        public static string SignBlockData(string timestamp, string dataHash, string privateKeyPem)
+        {
+            var data = dataHash.ToLower().Trim();
+
+            using var rsa = RSA.Create();
+            rsa.ImportFromPem(privateKeyPem);
+
+            var bytes = Encoding.UTF8.GetBytes(data);
+            var signature = rsa.SignData(
+                bytes,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1
+            );
+
+            return Convert.ToBase64String(signature);
+        }
+
         public static string SignData(string nodeId, long timestamp, string privateKeyPem)
         {
             var data = $"{nodeId}|{timestamp}";
@@ -218,40 +241,73 @@ namespace WorkerService1.Services.Validator_data
             return height < 0 ? null : GetBlock(height);
         }
 
+        public Block? GetBlockByVersion(string currentId, string version)
+        {
+            var heightStr = _db.Get($"index_version_{currentId.ToLower().Trim()}_{version.ToLower().Trim()}");
+            if (heightStr == null) return null;
+            return GetBlockByHeight(long.Parse(heightStr));
+        }
+
+        public Block? GetBlockByTypeVersion(string type, string currentId, string version)
+        {
+
+            string safeType = type?.ToLower().Trim() ?? "";
+            string safeId = currentId?.ToLower().Trim() ?? "";
+            string safeVersion = version?.ToLower().Trim() ?? "";
+            string key = $"idx_exact_{safeType}_{safeId}_{safeVersion}";
+            var heightStr = _db.Get(key);
+
+            if (string.IsNullOrEmpty(heightStr)) return null;
+
+       
+            if (long.TryParse(heightStr, out long height))
+            {
+                return GetBlockByHeight(height);
+            }
+
+            return null;
+        }
+
         public Boolean SaveBlock(Block block)
         {
             var block_current = GetBlockByHeight(block.Height);
             if (block_current != null) return false;
 
-
             string json = JsonSerializer.Serialize(block);
-
             _db.Put($"block_height_{block.Height}", json);
+            _db.Put($"block_hash_{block.Hash.ToLower()}", block.Height.ToString());
 
-            _db.Put($"block_hash_{block.Hash}", block.Height.ToString());
+            string safeId = block.current_id?.ToLower().Trim() ?? "";
+            string safeVersion = block.Version?.ToLower().Trim() ?? "1";
+            string safeStatus = block.status?.ToLower().Trim() ?? "pending";
+            string safeType = block.type?.ToLower().Trim() ?? "";
 
-            if (!string.IsNullOrEmpty(block.current_id))
+            if (!string.IsNullOrEmpty(safeId))
             {
-                _db.Put($"index_current_{block.current_id}", block.Height.ToString());
+                // Index tìm chính xác Version (Để Trace lô hàng cũ)
+                _db.Put($"index_version_{safeId}_{safeVersion}", block.Height.ToString());
+
+                // Index trỏ vào bản mới nhất hiện tại
+                _db.Put($"index_current_{safeId}", block.Height.ToString());
+
+                // duyệt (Scan) lịch sử SP
+                _db.Put($"idx_history_{safeId}_{block.Height}", safeVersion);
             }
 
-
-            if (!string.IsNullOrEmpty(block.type) && !string.IsNullOrEmpty(block.current_id))
+            if (!string.IsNullOrEmpty(safeType) && !string.IsNullOrEmpty(safeId))
             {
-                _db.Put($"index_type_{block.type}_{block.current_id}_{block.status}", block.Height.ToString());
-            }
+                // Index tìm chính xác theo Type + ID + Version (Rất quan trọng cho VerifyTrace)
+                string exactKey = $"idx_exact_{safeType}_{safeId}_{safeVersion}";
+                _db.Put(exactKey, block.Height.ToString());
 
-            if (!string.IsNullOrEmpty(block.current_id))
-            {
-                _db.Put($"index_history_{block.current_id}_{block.Height}", "1");
+                // Index tìm theo loại (Ví dụ: Lấy bản mới nhất của SP gia công OEM)
+                string typeKey = $"index_type_{safeType}_{safeId}";
+                _db.Put(typeKey, block.Height.ToString());
             }
 
             _db.Put(LatestHeightKey, block.Height.ToString());
-
             return true;
         }
-
-
         public string ComputeMerkleRoot(List<string> hashes)
         {
             if (hashes == null || hashes.Count == 0)

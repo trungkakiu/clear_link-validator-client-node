@@ -176,14 +176,13 @@ public class NodeWebSocketService
 
     private async Task ListenLoop(CancellationToken token)
     {
-        // Buffer tạm để nhận từng mảnh dữ liệu
         var buffer = new byte[16384];
 
         if (_state == WsState.Authenticated) { _initSent = true; }
 
         while (!token.IsCancellationRequested && _ws.State == WebSocketState.Open)
         {
-            // 🚀 VÍT GA: Dùng MemoryStream để gom đủ 100% dữ liệu trước khi Parse
+           
             using (var ms = new MemoryStream())
             {
                 WebSocketReceiveResult res;
@@ -195,7 +194,7 @@ public class NodeWebSocketService
                         if (res.MessageType == WebSocketMessageType.Close) return;
                         ms.Write(buffer, 0, res.Count);
                     }
-                    while (!res.EndOfMessage); // Chờ cho đến khi nhận hết toàn bộ gói tin JSON lớn
+                    while (!res.EndOfMessage);
                 }
                 catch (Exception ex)
                 {
@@ -237,15 +236,7 @@ public class NodeWebSocketService
                         var time = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                         _nodeDb.ChangeLastActive(time);
 
-                        await Send(new
-                        {
-                            type = "client_debug",
-                            level = "ERROR",
-                            sessionId = sessionId,
-                            message = "ListenLoop call",
-
-                        }, token);
-
+                   
                         if (type == "command")
                         {
 
@@ -253,7 +244,298 @@ public class NodeWebSocketService
                             _logger.LogInformation($"WS Command Received: {command}");
                             string requestId = root.GetProperty("requestId").GetString();
                             var status = _nodeDb.GetStatus();
+                            
+                            if (command == "product_trace")
+                                {
+                                    try
+                                    {
+                                        var payloadElement = root.GetProperty("payload");
+                                        var dto = payloadElement.Deserialize<PairProductPayloadDto>();
 
+                                        if (status != "active")
+                                        {
+                                            await Send(new
+                                            {
+                                                type = "Product_trace_respone",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                block = new { ok = false, message = "node not active", status = "node " + status },
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                            return;
+                                        }
+
+                                        await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                                        {
+                                            try
+                                            {
+                                                var result = _controller.VerifyTrace(dto);
+                                                var blockData = result.block;
+
+                                                await Send(new
+                                                {
+                                                    type = "Product_trace_respone",
+                                                    requestId = requestId,
+                                                    sessionId = sessionId,
+                                                    block = new
+                                                    {
+                                                        ok = result.ok,
+                                                        message = result.message,
+                                                        status = result.status,
+                                                        block_hash = blockData?.Hash ?? "N/A",
+                                                        height = blockData?.Height ?? 0,
+                                                        previous = blockData?.PreviousHash ?? "GENESIS",
+                                                        validator = _config.NodeId,
+                                                        type = "client", 
+                                                        time = DateTime.UtcNow
+                                                    }
+                                                }, token);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                await Send(new
+                                                {
+                                                    type = "Product_trace_respone",
+                                                    requestId = requestId,
+                                                    sessionId = sessionId,
+                                                    block = new { ok = false, message = ex.Message, status = "error" },
+                                                    time = DateTime.UtcNow
+                                                }, token);
+                                            }
+                                        });
+                                    }
+                                    catch (Exception e)
+                                    {
+                                        await Send(new
+                                        {
+                                            type = "Product_trace_respone",
+                                            requestId = requestId,
+                                            ok = false,
+                                            block = new { ok = false,  message = e.Message, status = "node " + status },
+                                            status = "error"
+                                        }, token);
+                                    }
+                                }
+
+                            if (command == "batch_trace")
+                            {
+                                try
+                                {
+                                    var payloadElement = root.GetProperty("payload");
+                                    var dto = payloadElement.Deserialize<PairProductPayloadDto>();
+
+           
+                                    if (status != "active")
+                                    {
+                                        await Send(new
+                                        {
+                                            type = "Batch_trace_respone",
+                                            requestId = requestId,
+                                            sessionId = sessionId,
+                                            block = new { ok = false, message = "node not active", status = "node " + status },
+                                            time = DateTime.UtcNow
+                                        }, token);
+                                        return;
+                                    }
+
+                                    await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                                    {
+                                        try
+                                        {
+                                            var result = _controller.VerifyTrace(dto);
+                                            var blockData = result.block;
+
+                                            await Send(new
+                                            {
+                                                type = "Batch_trace_respone",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                block = new
+                                                {
+                                                    ok = result.ok,
+                                                    message = result.message,
+                                                    status = result.status,
+                                                    block_hash = blockData?.Hash ?? "N/A",
+                                                    height = blockData?.Height ?? 0,
+                                                    previous = blockData?.PreviousHash ?? "GENESIS",
+                                                    validator = _config.NodeId,
+                                                    type = "client", 
+                                                    time = DateTime.UtcNow
+                                                }
+                                            }, token);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            await Send(new
+                                            {
+                                                type = "Batch_trace_respone",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                block = new { ok = false, message = ex.Message, status = "error" },
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                        }
+                                    });
+                                }
+                                catch (Exception e)
+                                {
+                                    await Send(new
+                                    {
+                                        type = "Batch_trace_respone",
+                                        requestId = requestId,
+                                        ok = false,
+                                        block = new { ok = false,  message = e.Message, status = "node " + status },
+                                        status = "error"
+                                    }, token);
+                                }
+                            }
+
+                            if (command == "ship_trace")
+                            {
+                                try
+                                {
+                                    var payloadElement = root.GetProperty("payload");
+                                    var dto = payloadElement.Deserialize<PairProductPayloadDto>();
+
+           
+                                    if (status != "active")
+                                    {
+                                        await Send(new
+                                        {
+                                            type = "Ship_trace_respone",
+                                            requestId = requestId,
+                                            sessionId = sessionId,
+                                            block = new { ok = false, message = "node not active", status = "node " + status },
+                                            time = DateTime.UtcNow
+                                        }, token);
+                                        return;
+                                    }
+
+                                    await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                                    {
+                                        try
+                                        {
+                                            var result = _controller.VerifyTrace(dto);
+                                            var blockData = result.block;
+
+                                            await Send(new
+                                            {
+                                                type = "Ship_trace_respone",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                block = new
+                                                {
+                                                    ok = result.ok,
+                                                    message = result.message,
+                                                    status = result.status,
+                                                    block_hash = blockData?.Hash ?? "N/A",
+                                                    height = blockData?.Height ?? 0,
+                                                    previous = blockData?.PreviousHash ?? "GENESIS",
+                                                    validator = _config.NodeId,
+                                                    type = "client", 
+                                                    time = DateTime.UtcNow
+                                                }
+                                            }, token);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            await Send(new
+                                            {
+                                                type = "Ship_trace_respone",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                block = new { ok = false, message = ex.Message, status = "error" },
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                        }
+                                    });
+                                }
+                                catch (Exception e)
+                                {
+                                    await Send(new
+                                    {
+                                        type = "Ship_trace_respone",
+                                        requestId = requestId,
+                                        ok = false,
+                                        block = new { ok = false,  message = e.Message, status = "node " + status },
+                                        status = "error"
+                                    }, token);
+                                }
+                            }
+
+                            if (command == "company_trace")
+                            {
+                                try
+                                {
+                                    var payloadElement = root.GetProperty("payload");
+                                    var dto = payloadElement.Deserialize<PairProductPayloadDto>();
+
+           
+                                    if (status != "active")
+                                    {
+                                        await Send(new
+                                        {
+                                            type = "Company_trace_respone",
+                                            requestId = requestId,
+                                            sessionId = sessionId,
+                                            block = new { ok = false, message = "node not active", status = "node " + status },
+                                            time = DateTime.UtcNow
+                                        }, token);
+                                        return;
+                                    }
+
+                                    await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                                    {
+                                        try
+                                        {
+                                            var result = _controller.VerifyTrace(dto);
+                                            var blockData = result.block;
+
+                                            await Send(new
+                                            {
+                                                type = "Company_trace_respone",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                block = new
+                                                {
+                                                    ok = result.ok,
+                                                    message = result.message,
+                                                    status = result.status,
+                                                    block_hash = blockData?.Hash ?? "N/A",
+                                                    height = blockData?.Height ?? 0,
+                                                    previous = blockData?.PreviousHash ?? "GENESIS",
+                                                    validator = _config.NodeId,
+                                                    type = "client", 
+                                                    time = DateTime.UtcNow
+                                                }
+                                            }, token);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            await Send(new
+                                            {
+                                                type = "Company_trace_respone",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                block = new { ok = false, message = ex.Message, status = "error" },
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                        }
+                                    });
+                                }
+                                catch (Exception e)
+                                {
+                                    await Send(new
+                                    {
+                                        type = "Company_trace_respone",
+                                        requestId = requestId,
+                                        ok = false,
+                                        block = new { ok = false,  message = e.Message, status = "node " + status },
+                                        status = "error"
+                                    }, token);
+                                }
+                            }
+                            
                             if (command == "get_status")
                             {
                                 if (_config.Status != "active")
@@ -321,14 +603,10 @@ public class NodeWebSocketService
                                     return;
                                 }
 
-                                if (votedata.command_type == "new")
-                                {
-                                    voteResult = _controller.GetFirstVote(votedata);
-                                }
-                                else
-                                {
-                                    voteResult = _controller.GetVote(votedata);
-                                }
+
+                                voteResult = _controller.GetFirstVote(votedata);
+                                
+                                
                                 await Send(new
                                 {
                                     type = "vote_response",
@@ -413,108 +691,215 @@ public class NodeWebSocketService
                             {
                                 _logger.LogInformation("PAIR_USER received!");
 
-                                var payloadElement = root.GetProperty("payload");
-                                var dto = payloadElement.Deserialize<PairUserPayloadDto>();
-
-
-                                if (status != "active")
+                                try 
                                 {
+                                    var payloadElement = root.GetProperty("payload");
+                                    
+                                    var dto = payloadElement.Deserialize<PairUserPayloadDto>(); 
+
+                                    if (status != "active")
+                                    {
+                                        await Send(new
+                                        {
+                                            type = "pair_user_response",
+                                            requestId = requestId,
+                                            sessionId = sessionId,
+                                            nodeId = _config.NodeId,
+                                            ok = false,
+                                            block = new { ok = false, message = "node " + status }, 
+                                            time = DateTime.UtcNow
+                                        }, token);
+                                        return;
+                                    }
+
+                                    await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                                    {
+                                        try
+                                        {
+                                            var result = _controller.PairUser(dto);
+
+                                            await Send(new
+                                            {
+                                                type = "pair_user_response",
+                                                requestId = requestId,
+                                                nodeId = _config.NodeId,
+                                                sessionId = sessionId,
+                                                ok = result.RC == 200,
+                                                block = result.RD, 
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            await Send(new
+                                            {
+                                                type = "pair_user_response",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                nodeId = _config.NodeId,
+                                                ok = false,
+                                                block = new { ok = false, message = ex.Message }, 
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                        }
+                                    });
+                                }
+                                catch (Exception e) // <--- LƯỚI AN TOÀN BẮT LỖI DỮ LIỆU Ở ĐÂY
+                                {
+                                    _logger.LogError($"[PAIR_USER CRITICAL ERROR] Lỗi DTO: {e.Message}");
                                     await Send(new
                                     {
                                         type = "pair_user_response",
                                         requestId = requestId,
+                                        sessionId = sessionId,
+                                        nodeId = _config.NodeId,
                                         ok = false,
-                                        block = "node " + status,
+                                        block = new { ok = false, message = "JSON Parse Error: " + e.Message }, 
                                         time = DateTime.UtcNow
                                     }, token);
-                                    return;
                                 }
-
-                                await __taskQueueService.EnqueueTaskAsync(async (token) =>
-                                {
-                                    try
-                                    {
-                                        var result = _controller.PairUser(dto);
-
-                                        await Send(new
-                                        {
-                                            type = "pair_user_response",
-                                            requestId = requestId,
-                                            ok = result.RC == 200,
-                                            block = result.RD,
-                                            time = DateTime.UtcNow
-                                        }, token);
-                                    }
-                                    catch (Exception ex)
-                                    {
-
-
-                                        await Send(new
-                                        {
-                                            type = "pair_user_response",
-                                            requestId = requestId,
-                                            ok = false,
-                                            block = "",
-                                            time = DateTime.UtcNow
-                                        }, token);
-                                    }
-
-                                });
-
-
                             }
-
+                            
                             if (command == "pair_product")
                             {
-                                _logger.LogInformation("PAIR_PRODUCT received!");
 
-                                var payloadElement = root.GetProperty("payload");
-                                var dto = payloadElement.Deserialize<PairProductPayloadDto>();
-
-
-                                if (status != "active")
+                                try
                                 {
-
+                                    var payloadElement = root.GetProperty("payload");
+                                    var dto = payloadElement.Deserialize<PairProductPayloadDto>();
                                     await Send(new
                                     {
-                                        type = "pair_product_response",
+                                        type = "client_debug",
                                         requestId = requestId,
+                                        sessionId = sessionId,
+                                        nodeId = _config.NodeId,
                                         ok = false,
                                         block = "node " + status,
                                         time = DateTime.UtcNow
                                     }, token);
+
+                                    if (status != "active")
+                                    {
+
+                                        await Send(new
+                                        {
+                                            type = "pair_product_response",
+                                            requestId = requestId,
+                                            sessionId = sessionId,
+                                            nodeId = _config.NodeId,
+                                            ok = false,
+                                            block = "node " + status,
+                                            time = DateTime.UtcNow
+                                        }, token);
+
+                                        await Send(new
+                                        {
+                                            type = "client_debug",
+                                            requestId = requestId,
+                                            sessionId = sessionId,
+                                            nodeId = _config.NodeId,
+                                            ok = false,
+                                            block = "node " + status + "down",
+                                            time = DateTime.UtcNow
+                                        }, token);
+                                        return;
+                                    }
+
+                                    await __taskQueueService.EnqueueTaskAsync(async (token) =>
+                                    {
+                                        await Send(new
+                                        {
+                                            type = "client_debug",
+                                            requestId = requestId,
+                                            sessionId = sessionId,
+                                            nodeId = _config.NodeId,
+                                            ok = false,
+                                            block = "start " + status,
+                                            time = DateTime.UtcNow
+                                        }, token);
+                                        try
+                                        {
+                                            var existSBlock = _chain.GetBlockByTypeVersion("product_create", dto.payload.product_id, dto.payload.version);
+                                            if (existSBlock != null)
+                                            {
+                                                await Send(new
+                                                {
+                                                    type = "pair_product_response",
+                                                    requestId = requestId,
+                                                    sessionId = sessionId,
+                                                    nodeId = _config.NodeId,
+                                                    ok = false,
+                                                    block = "Block version already exists!",
+                                                    time = DateTime.UtcNow
+                                                }, token);
+                                                return;
+                                            }
+
+                                            var result = _controller.PairProduct(dto);
+
+                                            await Send(new
+                                            {
+                                                type = "client_debug",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                nodeId = _config.NodeId,
+                                                ok = false,
+                                                block = "started " + result,
+                                                time = DateTime.UtcNow
+                                            }, token);
+
+                                            await Send(new
+                                            {
+                                                type = "pair_product_response",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                nodeId = _config.NodeId,
+                                                ok = result.RC == 200,
+                                                block = result.RD,
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            await Send(new
+                                            {
+                                                type = "pair_product_response",
+                                                requestId = requestId,
+                                                ok = false,
+                                                sessionId = sessionId,
+                                                nodeId = _config.NodeId,
+                                                block = new { },
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                            await Send(new
+                                            {
+                                                type = "client_debug",
+                                                requestId = requestId,
+                                                sessionId = sessionId,
+                                                nodeId = _config.NodeId,
+                                                ok = false,
+                                                block = "error " + ex.Message,
+                                                time = DateTime.UtcNow
+                                            }, token);
+                                        }
+
+                                    });
+                                }
+                                catch (Exception e)
+                                {
+                                    await Send(new
+                                    {
+                                        type = "client_debug",
+                                        requestId = requestId,
+                                        ok = false,
+                                        sessionId = sessionId,  
+                                        nodeId = _config.NodeId,
+                                        message = e.Message,
+                                        time = DateTime.UtcNow
+                                    }, token);
                                     return;
                                 }
-
-                                await __taskQueueService.EnqueueTaskAsync(async (token) =>
-                                {
-                                    try
-                                    {
-                                        var result = _controller.PairProduct(dto);
-
-                                        await Send(new
-                                        {
-                                            type = "pair_product_response",
-                                            requestId = requestId,
-                                            ok = result.RC == 200,
-                                            block = result.RD,
-                                            time = DateTime.UtcNow
-                                        }, token);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        await Send(new
-                                        {
-                                            type = "pair_product_response",
-                                            requestId = requestId,
-                                            ok = false,
-                                            block = "",
-                                            time = DateTime.UtcNow
-                                        }, token);
-                                    }
-
-                                });
-
+                               
                             }
 
                             if (command == "override_block")
@@ -600,7 +985,9 @@ public class NodeWebSocketService
                                     await Send(new
                                     {
                                         type = "pair_other_response",
+                                        sessionId = sessionId,
                                         requestId = requestId,
+                                        nodeId = _config.NodeId,
                                         ok = false,
                                         block = "node " + status,
                                         time = DateTime.UtcNow
@@ -618,7 +1005,9 @@ public class NodeWebSocketService
                                         {
                                             type = "pair_other_response",
                                             requestId = requestId,
+                                            sessionId = sessionId,
                                             ok = result.RC == 200,
+                                            nodeId = _config.NodeId,
                                             block = result.RD,
                                             time = DateTime.UtcNow
                                         }, token);
@@ -629,6 +1018,8 @@ public class NodeWebSocketService
                                         {
                                             type = "pair_other_response",
                                             requestId = requestId,
+                                            sessionId = sessionId,
+                                            nodeId = _config.NodeId,
                                             ok = false,
                                             error = ex,
                                             block = "",
@@ -682,12 +1073,7 @@ public class NodeWebSocketService
 
                         if (type == "sync_response")
                         {
-                            await Send(new
-                            {
-                                type = "client_debug",
-                                level = "info",
-                                message = "sync_response call"
-                            }, token);
+                           
                             var ok = root.GetProperty("ok").GetBoolean();
                             string? syncStatus = root.TryGetProperty("sync_status", out var ss) ? ss.GetString() : null;
 
@@ -719,10 +1105,12 @@ public class NodeWebSocketService
                                                 status = blockEl.GetProperty("status").GetString()!,
                                                 Timestamp = blockEl.GetProperty("Timestamp").GetString()!,
                                                 type = blockEl.GetProperty("type").GetString()!,
-                                                ValidatorSignature = blockEl.GetProperty("ValidatorSignature").GetString()!,
                                                 Version = blockEl.GetProperty("Version").GetString()!,
                                                 MerkleRoot = blockEl.GetProperty("MerkleRoot").GetString()!
                                             };
+
+                                            string hashToLowerForSign = b.Hash.ToLower().Trim();
+                                            b.ValidatorSignature = BlockchainService.SignBlockData(b.Timestamp, hashToLowerForSign, _config.private_key);
 
                                             if (blockEl.TryGetProperty("headerRaw", out var hr))
                                             {
@@ -777,7 +1165,6 @@ public class NodeWebSocketService
                             });
                         }
 
-
                         if (type == "fork_response")
                         {
 
@@ -788,6 +1175,7 @@ public class NodeWebSocketService
                                 await Send(new
                                 {
                                     type = "log",
+                                    nodeId = _config.NodeId,
                                     level = "ERROR",
                                     message = "server critical"
                                 }, token);
@@ -800,6 +1188,7 @@ public class NodeWebSocketService
                                 await Send(new
                                 {
                                     type = "log",
+                                    nodeId = _config.NodeId,
                                     level = "WARN",
                                     message = "node status not fork"
                                 }, token);
@@ -847,6 +1236,7 @@ public class NodeWebSocketService
                                         {
                                             type = "log",
                                             level = "SUCCESS",
+                                            nodeId = _config.NodeId,
                                             message = "one step complate"
                                         }, token);
                                         return;
@@ -858,6 +1248,7 @@ public class NodeWebSocketService
                                         {
                                             type = "log",
                                             level = "ERROR",
+                                            nodeId = _config.NodeId,
                                             message = "invalid fork point"
                                         }, token);
                                         return;
@@ -1017,6 +1408,5 @@ public class NodeWebSocketService
         }
     }
 
-       
-  
+
 }

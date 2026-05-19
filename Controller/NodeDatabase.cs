@@ -2,6 +2,8 @@
 using System;
 using WorkerService1.Model;
 using WorkerService1.Services.Validator_data;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace WorkerService1.Controller
 {
@@ -9,13 +11,15 @@ namespace WorkerService1.Controller
     {
         private readonly LiteDatabase _db;
         private readonly ILiteCollection<NodeInfo> _nodes;
+        private readonly NodeConfigDto _config;
         private readonly BlockchainService _chain;
         private bool _isActive;
 
-        public NodeDatabase(BlockchainService chain)
+        public NodeDatabase(BlockchainService chain, NodeConfigDto config)
         {
 
             _chain = chain;
+            _config = config;
 
             var dbPath = Path.Combine(
                 AppContext.BaseDirectory,
@@ -67,6 +71,77 @@ namespace WorkerService1.Controller
             return forkBlock;
         }
 
+
+        public IResult TestKey(string value)
+        {
+            var privateKeyPem = _config.private_key;
+            var publicKeyPem = _config.public_key;
+
+            // Kiểm tra xem config đã nạp được key chưa
+            if (string.IsNullOrEmpty(privateKeyPem) || string.IsNullOrEmpty(publicKeyPem))
+            {
+                return Results.Json(new
+                {
+                    RM = "Lỗi: Không tìm thấy Private Key hoặc Public Key trong cấu hình.",
+                    RC = -404
+                });
+            }
+
+            string dataToTest = string.IsNullOrEmpty(value) ? "clearlink_test_payload" : value;
+
+            try
+            {
+
+                using var rsaPrivate = RSA.Create();
+                rsaPrivate.ImportFromPem(privateKeyPem);
+                
+                byte[] dataBytes = Encoding.UTF8.GetBytes(dataToTest);
+                byte[] signatureBytes = rsaPrivate.SignData(
+                    dataBytes, 
+                    HashAlgorithmName.SHA256, 
+                    RSASignaturePadding.Pkcs1
+                );
+                string signatureBase64 = Convert.ToBase64String(signatureBytes);
+
+                using var rsaPublic = RSA.Create();
+                rsaPublic.ImportFromPem(publicKeyPem);
+                
+                bool isValid = rsaPublic.VerifyData(
+                    dataBytes, 
+                    signatureBytes, 
+                    HashAlgorithmName.SHA256, 
+                    RSASignaturePadding.Pkcs1
+                );
+
+                if (isValid)
+                {
+                    return Results.Json(new
+                    {
+                        RM = "Thành công! Cặp Key hoàn toàn khớp nhau.",
+                        RC = 200,
+                        Data = dataToTest,
+                        Signature = signatureBase64
+                    });
+                }
+                else
+                {
+                    return Results.Json(new
+                    {
+                        RM = "Thất bại! Public Key KHÔNG THỂ xác thực chữ ký được tạo bởi Private Key này.",
+                        RC = -1
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                // Bắt lỗi format key, lỗi mã hóa,...
+                return Results.Json(new
+                {
+                    RM = $"Lỗi ngoại lệ trong quá trình mã hóa/giải mã: {ex.Message}",
+                    RC = -500
+                });
+            }
+        }
         public string GetStatus()
         {
             var node = _nodes.FindOne(x => x.Id == 1);
@@ -157,7 +232,19 @@ namespace WorkerService1.Controller
                 RD = list
             });
         }
+        
+        public string GetPublicKey()
+        {
+            var node = _nodes.FindOne(x => x.Id == 1);
+            
+            if (node == null)
+            {
+                Console.WriteLine($"[DB] Không tìm thấy Node trong danh sách tin cậy.");
+                return null;
+            }
 
+            return node.PublicKey;
+        }
         public IResult PairHash(int height)
         {
             var hashpair = _chain.compareHash(height);

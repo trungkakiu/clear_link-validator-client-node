@@ -15,6 +15,9 @@ namespace WorkerService1.Model
 
         [JsonPropertyName("private_key")]
         public string private_key { get; set; }
+        
+        [JsonPropertyName("public_key")]
+        public string public_key { get; set; }
 
         [JsonPropertyName("status")]
         public string Status { get; set; } = "active";

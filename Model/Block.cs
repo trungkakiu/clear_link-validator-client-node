@@ -21,7 +21,7 @@
         public string Creator { get; set; }
         public string Owner_id { get; set; }
         public string ValidatorSignature { get; set; }
-       
+        public string original_value { get; set; }
         public string Version { get; set; } = "1.0";
 
     }

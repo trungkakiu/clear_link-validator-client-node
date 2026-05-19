@@ -54,6 +54,7 @@ namespace WorkerService1.Model
         public string Public_key { get; set; }
         public string voteRoundId { get; set; }
 
+        public string version { get; set; }
         public string current_id { get; set; }
         public string type { get; set; }
         public string status { get; set; }
@@ -75,6 +76,15 @@ namespace WorkerService1.Model
         public bool ok { get; set; }
     }
 
+    public class TraceVerificationResult
+    {
+        public string message { get; set; }
+        public bool ok { get; set; }
+        public string status { get; set; }
+
+        public Block block { get; set; }
+    }
+    
     public class PairProductPayloadDto
     {
         public string timestamp { get; set; }
@@ -99,7 +109,7 @@ namespace WorkerService1.Model
         public string detail { get; set; }
         public string status { get; set; }
         public string original_value { get; set; }
-
+       
     }
 
     public class OtherBLocPairPayload
@@ -114,7 +124,6 @@ namespace WorkerService1.Model
         public string original_value { get; set; }
 
     }
-
 
     public class RepairBlockPayloadDto
     {
@@ -132,6 +141,7 @@ namespace WorkerService1.Model
         public string detail { get; set; }
         public string status { get; set; }
         public string first_price { get; set; }
+        public string original_value { get; set; }
         public string type { get; set; }
 
     }
@@ -149,6 +159,7 @@ namespace WorkerService1.Model
         public string hash { get; set; }
         public string type { get; set; }
         public string version { get; set; }
+        public string original_value { get; set; }
     }
 
     public class UserPairPayloadDto
